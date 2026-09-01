@@ -1,7 +1,7 @@
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -12,7 +12,7 @@ public class TestParticleSimulator {
 
     @Test
     public void testFallVisual() {
-        // Arrange: A 3x5 grid with sand (s) suspended over empty space (d)
+        // Arrange: A 3x5 grid with sand (s) suspended over empty space (.)
         // and a barrier (b) at the bottom.
         String initialBoard = """
             s.s
@@ -497,5 +497,232 @@ public class TestParticleSimulator {
             }
         }
         return sim;
+    }
+
+    @Test
+    public void testGrowFlower() {
+        String startState = """
+    ...
+    .z.
+    bbb
+    """.trim();
+
+        // The list of REQUIRED growth outcomes
+        List<String> expectedGrowthStates = new ArrayList<>();
+
+        expectedGrowthStates.add("""
+    ...
+    .z.
+    bbb
+    """.trim()); // no growth
+
+        expectedGrowthStates.add("""
+    ...
+    zz.
+    bbb
+    """.trim()); // Left
+
+        expectedGrowthStates.add("""
+    .z.
+    .z.
+    bbb
+    """.trim()); // Up
+
+        expectedGrowthStates.add("""
+    zz.
+    .z.
+    bbb
+    """.trim()); // Up + Left
+
+        expectedGrowthStates.add("""
+    ...
+    .zz
+    bbb
+    """.trim()); // Right
+
+        expectedGrowthStates.add("""
+    ..z
+    .zz
+    bbb
+    """.trim()); // Right + Up
+
+        expectedGrowthStates.add("""
+    .z.
+    .zz
+    bbb
+    """.trim()); // Up, Right (fall)
+
+        expectedGrowthStates.add("""
+    .zz
+    .zz
+    bbb
+    """.trim()); // Right, Up, Left
+
+
+
+        // --- ACT ---
+        Set<String> observedStates = new HashSet<>();
+
+        for (int i = 0; i < 10000; i++) {
+            ParticleSimulator sim = fromBoardString(startState);
+            sim.tick();
+            observedStates.add(sim.toString().trim());
+        }
+
+        // --- ASSERT 1: CHECK FOR MISSING STATES ---
+        for (String expected : expectedGrowthStates) {
+            assertWithMessage("""
+    Test Failed: A required growth state was never observed.
+    Missing State:
+    %s
+    """, expected)
+                    .that(observedStates)
+                    .contains(expected);
+        }
+
+        // --- ASSERT 2: CHECK FOR UNEXPECTED (INVALID) STATES ---
+
+        // Create a "White List" of all valid outcomes (Growth + No Change)
+        Set<String> validStates = new HashSet<>(expectedGrowthStates);
+
+        for (String observed : observedStates) {
+            assertWithMessage("""
+    Test Failed: An invalid/impossible state was generated.
+    Unexpected State:
+    %s
+    """, observed)
+                    .that(validStates)
+                    .contains(observed);
+        }
+    }
+
+    @Test
+    public void testGrowDoesNotOverwriteOccupiedNeighbors() {
+        // Arrange: a plant boxed in on every side by NON-EMPTY cells.
+        //   UP    = SAND   (cannot fall: the plant occupies the cell below it)
+        //   LEFT  = WATER  (cannot fall/flow: BARRIER below + BARRIER/plant on its sides)
+        //   RIGHT = WATER  (same)
+        //   DOWN  = BARRIER
+        // A correct grow() only writes into cells whose flavor == EMPTY, so with
+        // none of the four neighbours EMPTY the board must be completely static.
+        // A grow() that instead grows into anything "not a BARRIER" (or that skips
+        // the emptiness check entirely) will overwrite the SAND or WATER here.
+        // This is the same class of bug that otherwise only shows up in testBurn,
+        // where the plant/flower would grow into an adjacent FIRE particle.
+        String startState = """
+        sss
+        wpw
+        bbb
+        """.trim();
+
+        for (int i = 0; i < 2000; i++) {
+            ParticleSimulator sim = fromBoardString(startState);
+            sim.tick();
+            String result = sim.toString().trim();
+
+            assertWithMessage("""
+        Test Failed: grow() overwrote an occupied (non-EMPTY) neighbour.
+        grow() must only write into a neighbouring cell whose flavor is EMPTY.
+        Starting board:
+        %s
+        Board after one tick:
+        %s
+        """, startState, result)
+                    .that(result)
+                    .isEqualTo(startState);
+        }
+    }
+
+    @Test
+    public void testGrowGivesFreshLifespan() {
+        // Grown particle receives a fresh lifespan, not the parent's decayed lifespan
+        // How many ticks to let the boxed-in parent decay before opening a
+        // neighbor. Chosen so the parent's lifespan (150 - 5 = 145) is clearly
+        // and unambiguously different from a fresh PLANT_LIFESPAN (150) --
+        // if the bug is present (child inherits parent's *current* lifespan),
+        // the child would show 145 (or less), not 150.
+        final int DECAY_TICKS = 5;
+        // Upper bound on ticks to wait for growth once a neighbor is opened.
+        // grow() only attempts a specific direction with probability 1/10 per
+        // tick, so P(no growth in 200 ticks) = 0.9^200, effectively 0.
+        final int MAX_TICKS_TO_WAIT_FOR_GROWTH = 200;
+        // Repeat the whole experiment several times for robustness against
+        // any single unlucky run, since growth timing is random.
+        final int TRIALS = 200;
+
+        for (int trial = 0; trial < TRIALS; trial++) {
+            // Arrange: plant boxed in on all four sides -- cannot fall or
+            // grow anywhere yet, so it will only decay while we tick it.
+            String startState = """
+        bbb
+        bpb
+        bbb
+        """.trim();
+            ParticleSimulator sim = fromBoardString(startState);
+
+            // Sanity check the parent starts at full lifespan.
+            assertWithMessage("Test setup assumption failed: parent should start at full PLANT_LIFESPAN")
+                    .that(sim.particles[1][1].lifespan)
+                    .isEqualTo(Particle.PLANT_LIFESPAN);
+
+            // Act 1: let the parent decay while it has nowhere to grow.
+            for (int i = 0; i < DECAY_TICKS; i++) {
+                sim.tick();
+            }
+
+            int parentLifespanAfterDecay = sim.particles[1][1].lifespan;
+            assertWithMessage("""
+        Test setup assumption failed: parent's lifespan should have decayed
+        below PLANT_LIFESPAN after boxed-in ticks, so this test can tell
+        a fresh lifespan apart from an inherited (decayed) one.
+        """)
+                    .that(parentLifespanAfterDecay)
+                    .isLessThan(Particle.PLANT_LIFESPAN);
+
+            // Act 2: open exactly the LEFT neighbor (x-1, same y) so growth
+            // becomes possible. LEFT is used specifically because, given
+            // tick()'s traversal order (x ascending, then y ascending), the
+            // LEFT cell (smaller x) is always processed *before* the parent
+            // within the same tick -- so if it's grown into during the
+            // parent's action(), it will NOT also get decrementLifespan()'d
+            // later in that same tick. (RIGHT/UP are processed *after* the
+            // parent and would be decremented once more in the same tick;
+            // DOWN would trigger fall() instead of grow(), since fall() is
+            // checked before grow() in action().)
+            sim.particles[0][1].flavor = ParticleFlavor.EMPTY;
+            sim.particles[0][1].lifespan = -1;
+
+            // Act 3: tick until the opened neighbor becomes a PLANT (i.e.
+            // until growth into it occurs), then stop.
+            boolean grew = false;
+            for (int i = 0; i < MAX_TICKS_TO_WAIT_FOR_GROWTH; i++) {
+                sim.tick();
+                if (sim.particles[0][1].flavor == ParticleFlavor.PLANT) {
+                    grew = true;
+                    break;
+                }
+            }
+
+            assertWithMessage("""
+        Test Failed: the opened neighbor never grew into a PLANT within
+        %s ticks. This should be astronomically unlikely if grow() is
+        implemented correctly -- check that growth is happening at all.
+        """, MAX_TICKS_TO_WAIT_FOR_GROWTH)
+                    .that(grew)
+                    .isTrue();
+
+            // Assert: the newly grown particle must have a FRESH PLANT_LIFESPAN,
+            // not the parent's decayed lifespan at the moment of growth.
+            int childLifespan = sim.particles[0][1].lifespan;
+            assertWithMessage("""
+        Test Failed: grown particle did not receive a fresh PLANT_LIFESPAN.
+        Parent's lifespan at time of growth was (at most): %s
+        Child's lifespan after growth was: %s
+        Expected child's lifespan to be the full PLANT_LIFESPAN (%s),
+        not inherited from the parent's already-decayed lifespan.
+        """, parentLifespanAfterDecay, childLifespan, Particle.PLANT_LIFESPAN)
+                    .that(childLifespan)
+                    .isEqualTo(Particle.PLANT_LIFESPAN);
+        }
     }
 }
