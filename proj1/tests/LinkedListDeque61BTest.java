@@ -9,7 +9,7 @@ import static com.google.common.truth.Truth.assertWithMessage;
 public class LinkedListDeque61BTest {
 
     @Test
-    /** In this test, we have three different assert statements that verify that addFirst works correctly. */
+    /** In this test, we add three elements to verify that addFirst works correctly. */
     public void addFirstTestBasic() {
         Deque61B<String> lld1 = new LinkedListDeque61B<>();
 
