@@ -1,10 +1,13 @@
 import edu.princeton.cs.algs4.In;
-import org.jsoup.Jsoup;
-import org.jsoup.nodes.Document;
-import org.jsoup.nodes.Element;
-import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 // You do not need to modify or submit this file.
 
@@ -122,9 +125,21 @@ public class ParseUtils {
     /** Fetches the full HTML for the given URL. Returns the HTML string, or "" on error. */
     public static String fetchHtml(String url) {
         try {
-            Document doc = Jsoup.connect(url).timeout(TIMEOUT).get();
-            return doc.outerHtml();
-        } catch (IOException e) {
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofMillis(TIMEOUT))
+                    .followRedirects(HttpClient.Redirect.NORMAL)
+                    .build();
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofMillis(TIMEOUT))
+                    .header("User-Agent", "Mozilla/5.0")
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            return response.body();
+        } catch (Exception e) {
             System.err.println("Failed to fetch page: " + e.getMessage());
             return "";
         }
@@ -135,34 +150,44 @@ public class ParseUtils {
         if (html == null || html.isEmpty()) {
             return new String[0];
         }
-        Document doc = Jsoup.parse(html);
 
-        // This is the key change: A much more specific selector to find the main content block.
-        // It looks for a div with class "mw-parser-output" INSIDE the div with id "mw-content-text".
-        Element content = doc.selectFirst("#mw-content-text .mw-parser-output");
+        // 1. Isolate main Wikipedia article text block (#mw-content-text / .mw-parser-output or #bodyContent)
+        String content = html;
+        Pattern parserOutputPattern = Pattern.compile("(?s)<div[^>]*class=[\"'][^\"']*mw-parser-output[^\"']*[\"'][^>]*>(.*)");
+        Matcher matcher = parserOutputPattern.matcher(html);
 
-        if (content == null) {
-            // Fallback in case the structure is slightly different
-            content = doc.selectFirst("#bodyContent");
-            if (content == null) {
-                return new String[0];
+        if (matcher.find()) {
+            content = matcher.group(1);
+        } else {
+            Pattern bodyContentPattern = Pattern.compile("(?s)<div[^>]*id=[\"']bodyContent[\"'][^>]*>(.*)");
+            Matcher bodyMatcher = bodyContentPattern.matcher(html);
+            if (bodyMatcher.find()) {
+                content = bodyMatcher.group(1);
             }
         }
 
-        // Remove elements that are not part of the main article text.
-        content.select("table.infobox, table.vertical-navbox").remove();
-        content.select("div.thumb, div.gallery, figure").remove();
-        content.select("div.mw-references-wrap, div.reflist").remove();
-        content.select("div#toc, div.toc").remove();
-        content.select("span.mw-editsection").remove(); // Removes the "[edit]" links
+        // 2. Remove script and style tags
+        content = content.replaceAll("(?s)<script[^>]*>.*?</script>", " ")
+                .replaceAll("(?s)<style[^>]*>.*?</style>", " ");
 
-        String text = content.text();
-        if (text == null) {
-            return new String[0];
-        }
+        // 3. Remove tables (infoboxes, navboxes), gallery/thumb divs, reflists, TOC, edit links
+        content = content.replaceAll("(?s)<table[^>]*>.*?</table>", " ")
+                .replaceAll("(?s)<figure[^>]*>.*?</figure>", " ")
+                .replaceAll("(?s)<div[^>]*class=[\"'][^\"']*(?:thumb|gallery|toc|reflist|mw-references-wrap)[^\"']*[\"'][^>]*>.*?</div>", " ")
+                .replaceAll("(?s)<span[^>]*class=[\"'][^\"']*mw-editsection[^\"']*[\"'][^>]*>.*?</span>", " ");
 
-        // Clean up the text.
-        text = text.replace('\u00A0', ' ').replaceAll("\\s+", " ").trim();
+        // 4. Strip remaining HTML tags
+        String text = content.replaceAll("<[^>]+>", " ");
+
+        // 5. Clean up non-breaking spaces, entities, and whitespace
+        text = text.replace("&nbsp;", " ")
+                .replace('\u00A0', ' ')
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"");
+
+        text = text.replaceAll("\\s+", " ").trim();
         if (text.isEmpty()) {
             return new String[0];
         }
@@ -179,6 +204,10 @@ public class ParseUtils {
         String url = "https://en.wikipedia.org/wiki/Cat";
 
         String[] words = fetchWords(url);
-        System.out.println("The first 3 words are: " + words[0] + ", "  + words[1] + ", " + words[2]);
+        if (words.length >= 3) {
+            System.out.println("The first 3 words are: " + words[0] + ", "  + words[1] + ", " + words[2]);
+        } else {
+            System.out.println("Fetched " + words.length + " words.");
+        }
     }
 }
