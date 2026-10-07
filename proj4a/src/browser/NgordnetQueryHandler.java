@@ -1,15 +1,13 @@
 package browser;
 
 import com.google.gson.Gson;
-import spark.QueryParamsMap;
-import spark.Request;
-import spark.Response;
-import spark.Route;
+import io.javalin.http.Context;
+import io.javalin.http.Handler;
 
 import java.util.Arrays;
 import java.util.List;
 
-public abstract class NgordnetQueryHandler implements Route {
+public abstract class NgordnetQueryHandler implements Handler {
     public abstract String handle(browser.NgordnetQuery q);
     private static final Gson GSON = new Gson();
 
@@ -24,27 +22,27 @@ public abstract class NgordnetQueryHandler implements Route {
         return Arrays.asList(requestedWords);
     }
 
-    private static browser.NgordnetQuery readQueryMap(QueryParamsMap qm) {
-        List<String> words = commaSeparatedStringToList(qm.get("words").value());
+    private static browser.NgordnetQuery readQueryMap(Context context) {
+        List<String> words = commaSeparatedStringToList(context.queryParam("words"));
 
         int startYear;
         int endYear;
         int k;
 
         try {
-            startYear = Integer.parseInt(qm.get("startYear").value());
+            startYear = Integer.parseInt(context.queryParam("startYear"));
         } catch (RuntimeException e) {
             startYear = DEFAULT_START_YEAR;
         }
 
         try {
-            endYear = Integer.parseInt(qm.get("endYear").value());
+            endYear = Integer.parseInt(context.queryParam("endYear"));
         } catch (RuntimeException e) {
             endYear = DEFAULT_END_YEAR;
         }
 
         try {
-            k = Integer.parseInt(qm.get("k").value());
+            k = Integer.parseInt(context.queryParam("k"));
         } catch (RuntimeException e) {
             k = 0;
         }
@@ -53,10 +51,9 @@ public abstract class NgordnetQueryHandler implements Route {
     }
 
     @Override
-    public String handle(Request request, Response response) throws Exception {
-        QueryParamsMap qm = request.queryMap();
-        NgordnetQuery nq = readQueryMap(qm);
+    public void handle(Context context) throws Exception {
+        NgordnetQuery nq = readQueryMap(context);
         String queryResult = handle(nq);
-        return GSON.toJson(queryResult);
+        context.result(GSON.toJson(queryResult));
     }
 }
