@@ -11,10 +11,10 @@ public class SimpleOomage implements Oomage {
     private static final double WIDTH = 0.01;
     private static final boolean USE_PERFECT_HASH = false;
 
-    /* -=-=-=-=- needs review -=-=-=-=-=-
-       TODO: Write this method. Use pattern matching (instanceof) to check
+    /*
+        TODO: Write this method. Use pattern matching (instanceof) to check
        whether o is a SimpleOomage, as in lecture.
-       -=-=-=-=- needs review -=-=-=-=-=- */
+       */
     @Override
     public boolean equals(Object o) {
         return false;
