@@ -31,12 +31,12 @@ public class Lab10Dijkstras {
         }
         this.source = source;
 
-        /* -=-=-=-=- needs review -=-=-=-=-=-
+        /* 
            To get you started: every node begins in the fringe. The source
            has distance 0 and every other node has "infinite" distance,
            which we represent with Integer.MAX_VALUE. Dijkstra's then
            repeatedly removes the closest node and relaxes its edges.
-           -=-=-=-=- needs review -=-=-=-=-=- */
+           */
         ExtrinsicMinPQ fringe = new ExtrinsicMinPQ();
         for (String node : g.nodes()) {
             distTo.put(node, Integer.MAX_VALUE);
